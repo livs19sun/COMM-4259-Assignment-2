@@ -1,0 +1,7 @@
+2C.1: I checked the shape of the raw and the prepared data in the app. From this, it shows that the raw data has 891 rows and 14 columns, while the prepared data has 891 rows and 17 columns. This tracks both with what the code shows in terms of the rows contained in both the raw and prepared dataset, and the 3 new columns that were created as a result of the data preparation I completed in the app.
+Summary:
+Rows after my Age decision: 891 on app, 891 on my code, match
+2C.1: I also checked the number of missing values in the dataset, since that was a common data quality issue that I ran into when analyzing the initial database. However, despite data cleaning, it still shows 177 missing values present in the dataset, specifically within the "Age" category
+Summary:
+Expected missing values: 0, Actual: 177, no match
+2C.2: One possible explanation for the missing values still being present in "Age" is that Claude code initially did not run the fill line code, meaning that the fillna line was likely ran after the to_csv command and was not present in the new titanic_features csv that Claude code would've used. To mitigate this, I went back into the original code and rewrote a command to only use fillna when the Age in a row was missing. By using groupby and pClass for the median, this new code also fulfills the original's intention of imputing by class to provide a more accurate summary. 
