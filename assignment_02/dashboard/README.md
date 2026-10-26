@@ -18,6 +18,8 @@ You choose every step; the app makes no decisions on its own and uses no AI mode
    **Undo last step** removes the last step; **Clear all steps** removes them all.
 4. **Download** the prepared data as `prepared_data.csv`.
 
+`data/titanic_train.csv` is kept only as a backup; the app does not use it.
+
 Steps run in the order you add them, so order matters (for example, add a missing flag *before* filling that column).
 
 ## How to run
