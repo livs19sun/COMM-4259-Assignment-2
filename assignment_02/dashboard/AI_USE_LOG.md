@@ -5,3 +5,6 @@ Rows after my Age decision: 891 on app, 891 on my code, match
 Summary:
 Expected missing values: 0, Actual: 177, no match
 2C.2: One possible explanation for the missing values still being present in "Age" is that Claude code initially did not run the fill line code, meaning that the fillna line was likely ran after the to_csv command and was not present in the new titanic_features csv that Claude code would've used. To mitigate this, I went back into the original code and rewrote a command to only use fillna when the Age in a row was missing. By using groupby and pClass for the median, this new code also fulfills the original's intention of imputing by class to provide a more accurate summary. 
+
+
+Additionally, my Claude Code work is split across two exports. The first has my initial interview and attempt at using Claude Code, and the second has a more refined version of the app development and instructions for an EDA tab
