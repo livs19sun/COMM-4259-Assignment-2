@@ -1,7 +1,16 @@
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+
+# scikit-learn is only needed for information gain and chi-squared in the EDA tab.
+# If it is not installed yet, the rest of the app still works.
+try:
+    from sklearn.feature_selection import chi2, mutual_info_classif
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 # The default data file, in the data/ folder next to this app
 DATA_FILE = Path(__file__).parent / "data" / "titanic_features.csv"
@@ -107,9 +116,15 @@ def apply_step(df, step):
     return df, code
 
 
-# Page settings and the one tab
+# True if a column has more than 10 different values and holds numbers (for example Age or Fare).
+# The EDA tab cuts these columns into 5 equal-size groups before comparing groups.
+def needs_bins(series):
+    return pd.api.types.is_numeric_dtype(series) and series.nunique() > 10
+
+
+# Page settings and the two tabs
 st.set_page_config(page_title="Data Preparation Workbench", layout="wide")
-(tab,) = st.tabs(["Data Preparation Workbench"])
+tab, eda_tab = st.tabs(["Data Preparation Workbench", "EDA"])
 
 # The first time the app runs, start with an empty list of steps
 if "steps" not in st.session_state:
@@ -214,3 +229,118 @@ with tab:
         file_name="prepared_data.csv",
         mime="text/csv",
     )
+
+# The EDA tab: it looks at the prepared data (df), the result of the workbench steps
+with eda_tab:
+    st.title("EDA")
+    st.write(f"This tab shows the **prepared data**: {source} after the {len(results)} workbench step(s). "
+             f"{df.shape[0]} rows, {df.shape[1]} columns.")
+
+    # Section 1: summary statistics of the number columns
+    st.header("1. Summary statistics")
+    st.code("df.describe()", language="python")
+    st.dataframe(df.describe())
+
+    # Section 1 (continued): how often each value appears in a chosen column
+    st.subheader("Frequency table")
+    vc_col = st.selectbox("Column to count", list(df.columns), index=None,
+                          placeholder="Choose a column...", key="eda_vc_col")
+    if vc_col is not None:
+        st.code(f'df["{vc_col}"].value_counts()', language="python")
+        st.dataframe(df[vc_col].value_counts())
+
+    # Section 2: histogram of a chosen number column
+    st.header("2. Histogram")
+    number_cols = list(df.select_dtypes("number").columns)
+    hist_col = st.selectbox("Number column", number_cols, index=None,
+                            placeholder="Choose a column...", key="eda_hist_col")
+    if hist_col is not None:
+        st.code(f'df["{hist_col}"].plot.hist(bins=20)', language="python")
+        fig, ax = plt.subplots(figsize=(7, 3))
+        df[hist_col].plot.hist(bins=20, ax=ax, color="#4C78A8", edgecolor="white")
+        ax.set_xlabel(hist_col)
+        ax.set_ylabel("count")
+        ax.spines[["top", "right"]].set_visible(False)
+        st.pyplot(fig)
+
+    # Section 3: correlation table of the number columns
+    st.header("3. Correlation table")
+    st.code("df.corr(numeric_only=True).round(2)", language="python")
+    st.dataframe(df.corr(numeric_only=True).round(2))
+
+    # Choose the target: any column that holds only 0 and 1 and has no missing values
+    st.header("4. Target")
+    target_cols = [c for c in df.columns
+                   if df[c].notnull().all() and set(df[c].unique()) <= {0, 1} and df[c].nunique() == 2]
+    if not target_cols:
+        st.info("This data has no 0/1 column without missing values, so sections 5 and 6 cannot be shown.")
+        st.stop()
+    target = st.selectbox("Target column (0/1)", target_cols,
+                          index=target_cols.index("Survived") if "Survived" in target_cols else 0,
+                          key="eda_target")
+
+    # Section 5: the rate of the target (for example Survived) in each group of a chosen column.
+    # Number columns with many values are cut into 5 equal-size groups first.
+    st.header(f"5. Rate of {target} for each group")
+    group_options = [c for c in df.columns if c != target and (df[c].nunique() <= 10 or needs_bins(df[c]))]
+    group_col = st.selectbox("Group column", group_options, index=None,
+                             placeholder="Choose a column...", key="eda_group_col")
+    if group_col is not None:
+        if needs_bins(df[group_col]):
+            groups = pd.qcut(df[group_col], 5, duplicates="drop")
+            code = (f'df.groupby(pd.qcut(df["{group_col}"], 5, duplicates="drop"), observed=True)'
+                    f'["{target}"].agg(["mean", "count"]).round(3)')
+        else:
+            groups = df[group_col]
+            code = f'df.groupby("{group_col}")["{target}"].agg(["mean", "count"]).round(3)'
+        st.code(code, language="python")
+        rates = df.groupby(groups, observed=True)[target].agg(["mean", "count"]).round(3)
+        # Show group names as text so ranges like (19.0, 25.0] display correctly
+        rates.index = rates.index.astype(str)
+        st.dataframe(rates)
+
+    # Section 6: feature weighting by information gain and chi-squared
+    st.header("6. Feature weighting: information gain and chi-squared")
+    if not HAS_SKLEARN:
+        st.warning("scikit-learn is not installed. Run `pip install scikit-learn` in a terminal, then click Rerun.")
+    else:
+        # Turn each column into group numbers (0, 1, 2, ...):
+        # number columns with many values -> 5 equal-size groups; columns with at most 10 values -> one number per value.
+        # Columns with missing values, and text columns with many values (like Name), are skipped.
+        X = pd.DataFrame(index=df.index)
+        skipped = []
+        for c in df.columns:
+            if c == target:
+                continue
+            if df[c].isnull().any():
+                skipped.append(f"{c} (has missing values)")
+            elif needs_bins(df[c]):
+                X[c] = pd.qcut(df[c], 5, labels=False, duplicates="drop")
+            elif df[c].nunique() <= 10:
+                X[c] = df[c].astype("category").cat.codes
+            else:
+                skipped.append(f"{c} (text with more than 10 values)")
+
+        st.code(
+            "# for each number column with many values (e.g. Age): 5 equal-size groups\n"
+            'X[col] = pd.qcut(df[col], 5, labels=False, duplicates="drop")\n'
+            "# for each column with at most 10 values (e.g. Sex): one number per value\n"
+            'X[col] = df[col].astype("category").cat.codes\n'
+            f'info_gain = mutual_info_classif(X, df["{target}"], discrete_features=True)\n'
+            f'chi2_scores, p_values = chi2(X, df["{target}"])',
+            language="python",
+        )
+
+        if X.shape[1] == 0:
+            st.info("No columns can be scored.")
+        else:
+            # Compute both scores and show them in one table, highest information gain first
+            info_gain = mutual_info_classif(X, df[target], discrete_features=True)
+            chi2_scores, p_values = chi2(X, df[target])
+            weights = pd.DataFrame(
+                {"information gain": info_gain, "chi-squared": chi2_scores, "chi-squared p-value": p_values},
+                index=X.columns,
+            ).sort_values("information gain", ascending=False)
+            st.dataframe(weights.round(4))
+        if skipped:
+            st.write("Skipped: " + ", ".join(skipped))
